@@ -1,0 +1,42 @@
+name: Auto Sign
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天北京时间 00:37 自动签到（GitHub cron 使用 UTC，+8 小时）
+    - cron: '37 16 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  auto-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          patchright install --with-deps chromium
+          patchright install chrome || echo "chrome 安装失败，将回退自带 chromium"
+          command -v xvfb-run >/dev/null 2>&1 || sudo apt-get install -y xvfb
+
+      - name: Run auto sign
+        env:
+          YAMIBO_COOKIE: ${{ secrets.YAMIBO_COOKIE }}
+          SC3_SENDKEY: ${{ secrets.SC3_SENDKEY }}
+          SC3_UID: ${{ secrets.SC3_UID }}
+          EXIT_WHEN_FAIL: ${{ vars.EXIT_WHEN_FAIL }}
+          HEADLESS: '0'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" python sign.py
