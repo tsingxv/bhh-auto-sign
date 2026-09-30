@@ -38,7 +38,10 @@ UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):  # 打包为 exe 后以可执行文件所在目录为基准
+    SCRIPT_DIR = os.path.dirname(sys.executable)
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_FILE = os.path.join(SCRIPT_DIR, "cookie.txt")
 USER_DATA_DIR = os.environ.get("BROWSER_DATA_DIR", os.path.join(SCRIPT_DIR, "browser-data"))
 

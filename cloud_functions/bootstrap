@@ -1,0 +1,10 @@
+#!/bin/bash
+# FunctionGraph 定制运行时入口（必须位于 zip 根目录且可执行）
+cd "$(dirname "$0")" || exit 1
+
+export PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers"
+export PYTHONPATH="$PWD/deps"
+export BROWSER_DATA_DIR="${BROWSER_DATA_DIR:-/tmp/yamibo-browser-data}"
+export HEADLESS=1
+
+exec "$PWD/python/bin/python3" "$PWD/runner.py"
