@@ -278,8 +278,21 @@ def run():
                 except Exception:
                     pass
 
+        def goto_tolerant(url, retries=2):
+            """容忍打卡结果页 3 秒后自动跳转导致的 ERR_ABORTED。"""
+            for attempt in range(retries + 1):
+                try:
+                    return page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                except Exception as e:
+                    if "ERR_ABORTED" in str(e) and attempt < retries:
+                        page.wait_for_timeout(4000)
+                        continue
+                    if attempt >= retries:
+                        raise
+            return None
+
         def load(path, label):
-            resp = page.goto(path, wait_until="domcontentloaded", timeout=60000)
+            resp = goto_tolerant(path)
             html = wait_real_page(page)
             st = resp.status if resp else "?"
             log(f"{label} HTTP {st} | 标题：{page.title()} | 页面长度 {len(html)}")
@@ -350,7 +363,7 @@ def run():
             )
 
         log(f"执行打卡：{sign_url}")
-        page.goto(sign_url, wait_until="domcontentloaded", timeout=60000)
+        goto_tolerant(sign_url)
         html2 = wait_real_page(page)
         message = extract_message(html2)
         if message:
@@ -363,8 +376,9 @@ def run():
                 [],
             )
 
+        page.wait_for_timeout(3500)
         log("复查签到状态…")
-        page.goto(SIGN_PAGE, wait_until="domcontentloaded", timeout=60000)
+        goto_tolerant(SIGN_PAGE)
         html3 = wait_real_page(page)
         stats = extract_stats(html3)
         close_all()
