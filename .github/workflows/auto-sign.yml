@@ -12,7 +12,7 @@ permissions:
 jobs:
   auto-sign:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 150
     env:
       TZ: Asia/Shanghai
     steps:
@@ -39,4 +39,18 @@ jobs:
           SC3_UID: ${{ secrets.SC3_UID }}
           EXIT_WHEN_FAIL: ${{ vars.EXIT_WHEN_FAIL }}
           HEADLESS: '0'
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" python sign.py
+        run: |
+          # GitHub 定时任务常延迟数小时，可能撞上百合会每日维护（退出码 3）：每 10 分钟重试一次
+          for i in $(seq 1 10); do
+            code=0
+            xvfb-run -a -s "-screen 0 1920x1080x24" python sign.py || code=$?
+            if [ "$code" -ne 3 ]; then
+              exit "$code"
+            fi
+            if [ "$i" -lt 10 ]; then
+              echo "站点维护中，10 分钟后重试（$i/10）"
+              sleep 600
+            fi
+          done
+          echo "维护窗口过长，本次未能签到"
+          exit 3

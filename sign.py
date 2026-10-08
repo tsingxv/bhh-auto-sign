@@ -54,6 +54,7 @@ except Exception:
 EXIT_OK = 0
 EXIT_RETRYABLE = 1
 EXIT_AUTH = 2
+EXIT_MAINTENANCE = 3  # 站点维护中：交给工作流定时重试，不算失败
 
 REAL_PAGE_MARKERS = (
     "formhash",
@@ -65,6 +66,19 @@ REAL_PAGE_MARKERS = (
 )
 CHALLENGE_HTML_MARKERS = ("challenge-platform", "cf_chl_opt", "turnstile")
 CHALLENGE_TITLES = ("请稍候…", "请稍候...", "Just a moment...", "Just a moment…")
+MAINTENANCE_MARKERS = ("每日维护", "维护中", "正在维护")
+
+
+def is_maintenance(html, page=None):
+    if any(m in html for m in MAINTENANCE_MARKERS):
+        return True
+    if page is None:
+        return False
+    try:
+        title = page.title()
+    except Exception:
+        return False
+    return any(m in title for m in MAINTENANCE_MARKERS)
 
 
 def log(msg):
@@ -144,6 +158,8 @@ def wait_real_page(page, timeout_s=60, challenge_budget_s=180):
             html = ""
         if any(m in html for m in REAL_PAGE_MARKERS):
             return html
+        if is_maintenance(html, page):
+            return html
         now = time.time()
         if is_challenge(page, html):
             if challenge_start is None:
@@ -222,7 +238,10 @@ def push_serverchan3(message, stats):
 
 def finish(code, message, stats):
     log("结果：" + " | ".join([message] + stats))
-    push_serverchan3(message, stats)
+    if code != EXIT_MAINTENANCE:  # 维护重试期间不推送，避免刷屏
+        push_serverchan3(message, stats)
+    if code == EXIT_MAINTENANCE:
+        sys.exit(EXIT_MAINTENANCE)
     if code != EXIT_OK and os.environ.get("EXIT_WHEN_FAIL") == "on":
         sys.exit(1)
     sys.exit(0)
@@ -306,12 +325,21 @@ def run():
             suffix = "（重试）" if attempt == 2 else ""
             if attempt == 2:
                 log("挑战未通过，经首页再试一次…")
-            load(f"{BASE}/forum.php", f"论坛首页{suffix}")
+            home = load(f"{BASE}/forum.php", f"论坛首页{suffix}")
+            if is_maintenance(home, page):
+                html = home
+                break
             html = load(SIGN_PAGE, f"签到页{suffix}")
+            if is_maintenance(html, page):
+                break
             if not (
                 "__noxExpire" in html or is_challenge(page, html) or len(html) < 500
             ):
                 break
+
+        if is_maintenance(html, page):
+            close_all()
+            finish(EXIT_MAINTENANCE, "站点每日维护中：工作流将在 10 分钟后自动重试", [])
 
         blocked = "__noxExpire" in html or is_challenge(page, html) or len(html) < 500
         if blocked:
