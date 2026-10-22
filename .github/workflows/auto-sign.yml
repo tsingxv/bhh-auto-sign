@@ -40,7 +40,7 @@ jobs:
           EXIT_WHEN_FAIL: ${{ vars.EXIT_WHEN_FAIL }}
           HEADLESS: '0'
         run: |
-          # GitHub 定时任务常延迟数小时，可能撞上百合会每日维护（退出码 3）：每 10 分钟重试一次
+          # GitHub 定时任务常延迟数小时，可能撞上百合会每日维护或 Cloudflare 5xx 源站宕机（退出码 3）：每 10 分钟重试一次
           for i in $(seq 1 10); do
             code=0
             xvfb-run -a -s "-screen 0 1920x1080x24" python sign.py || code=$?
@@ -48,9 +48,9 @@ jobs:
               exit "$code"
             fi
             if [ "$i" -lt 10 ]; then
-              echo "站点维护中，10 分钟后重试（$i/10）"
+              echo "站点暂时不可用（维护/源站宕机），10 分钟后重试（$i/10）"
               sleep 600
             fi
           done
-          echo "维护窗口过长，本次未能签到"
+          echo "站点持续不可用，本次未能签到"
           exit 3

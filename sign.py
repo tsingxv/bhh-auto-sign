@@ -54,7 +54,7 @@ except Exception:
 EXIT_OK = 0
 EXIT_RETRYABLE = 1
 EXIT_AUTH = 2
-EXIT_MAINTENANCE = 3  # 站点维护中：交给工作流定时重试，不算失败
+EXIT_RETRY_LATER = 3  # 站点维护 / 源站宕机等临时不可用：交给工作流定时重试，不算失败，也不推送
 
 REAL_PAGE_MARKERS = (
     "formhash",
@@ -67,6 +67,14 @@ REAL_PAGE_MARKERS = (
 CHALLENGE_HTML_MARKERS = ("challenge-platform", "cf_chl_opt", "turnstile")
 CHALLENGE_TITLES = ("请稍候…", "请稍候...", "Just a moment...", "Just a moment…")
 MAINTENANCE_MARKERS = ("每日维护", "维护中", "正在维护")
+UNAVAILABLE_MARKERS = (
+    "Web server is down",       # Cloudflare 521 源站宕机
+    "Connection timed out",     # Cloudflare 522
+    "Origin is unreachable",    # Cloudflare 523
+    "A timeout occurred",       # Cloudflare 524
+    "SSL handshake failed",     # Cloudflare 525
+    "Invalid SSL certificate",  # Cloudflare 526
+)
 
 
 def is_maintenance(html, page=None):
@@ -79,6 +87,15 @@ def is_maintenance(html, page=None):
     except Exception:
         return False
     return any(m in title for m in MAINTENANCE_MARKERS)
+
+
+def unavailable_reason(html, page=None):
+    if is_maintenance(html, page):
+        return "站点每日维护"
+    for m in UNAVAILABLE_MARKERS:
+        if m in html:
+            return f"站点源站不可用（Cloudflare：{m}）"
+    return ""
 
 
 def log(msg):
@@ -158,7 +175,7 @@ def wait_real_page(page, timeout_s=60, challenge_budget_s=180):
             html = ""
         if any(m in html for m in REAL_PAGE_MARKERS):
             return html
-        if is_maintenance(html, page):
+        if unavailable_reason(html, page):
             return html
         now = time.time()
         if is_challenge(page, html):
@@ -238,10 +255,10 @@ def push_serverchan3(message, stats):
 
 def finish(code, message, stats):
     log("结果：" + " | ".join([message] + stats))
-    if code != EXIT_MAINTENANCE:  # 维护重试期间不推送，避免刷屏
+    if code != EXIT_RETRY_LATER:  # 重试期间不推送，避免刷屏
         push_serverchan3(message, stats)
-    if code == EXIT_MAINTENANCE:
-        sys.exit(EXIT_MAINTENANCE)
+    if code == EXIT_RETRY_LATER:
+        sys.exit(EXIT_RETRY_LATER)
     if code != EXIT_OK and os.environ.get("EXIT_WHEN_FAIL") == "on":
         sys.exit(1)
     sys.exit(0)
@@ -326,20 +343,21 @@ def run():
             if attempt == 2:
                 log("挑战未通过，经首页再试一次…")
             home = load(f"{BASE}/forum.php", f"论坛首页{suffix}")
-            if is_maintenance(home, page):
+            if unavailable_reason(home, page):
                 html = home
                 break
             html = load(SIGN_PAGE, f"签到页{suffix}")
-            if is_maintenance(html, page):
+            if unavailable_reason(html, page):
                 break
             if not (
                 "__noxExpire" in html or is_challenge(page, html) or len(html) < 500
             ):
                 break
 
-        if is_maintenance(html, page):
+        reason = unavailable_reason(html, page)
+        if reason:
             close_all()
-            finish(EXIT_MAINTENANCE, "站点每日维护中：工作流将在 10 分钟后自动重试", [])
+            finish(EXIT_RETRY_LATER, f"{reason}：工作流将在 10 分钟后自动重试", [])
 
         blocked = "__noxExpire" in html or is_challenge(page, html) or len(html) < 500
         if blocked:
