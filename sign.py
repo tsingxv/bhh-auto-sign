@@ -175,6 +175,8 @@ def wait_real_page(page, timeout_s=60, challenge_budget_s=180):
             html = ""
         if any(m in html for m in REAL_PAGE_MARKERS):
             return html
+        if page.url.startswith("chrome-error://"):
+            return html
         if unavailable_reason(html, page):
             return html
         now = time.time()
@@ -306,6 +308,17 @@ def run():
         context.add_cookies(cookies)
         page = context.new_page()
 
+        doc_status = {"code": None}
+
+        def on_response(resp):
+            try:
+                if resp.request.resource_type == "document":
+                    doc_status["code"] = resp.status
+            except Exception:
+                pass
+
+        page.on("response", on_response)
+
         def close_all():
             try:
                 context.close()
@@ -318,24 +331,32 @@ def run():
                     pass
 
         def goto_tolerant(url, retries=2):
-            """容忍打卡结果页 3 秒后自动跳转导致的 ERR_ABORTED。"""
+            """容忍打卡结果页 3 秒后自动跳转导致的 ERR_ABORTED，以及原站 5xx 导致的导航失败。"""
             for attempt in range(retries + 1):
                 try:
                     return page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 except Exception as e:
-                    if "ERR_ABORTED" in str(e) and attempt < retries:
+                    msg = str(e)
+                    if attempt < retries and ("ERR_ABORTED" in msg or "ERR_HTTP_RESPONSE_CODE_FAILURE" in msg):
                         page.wait_for_timeout(4000)
                         continue
-                    if attempt >= retries:
-                        raise
+                    log(f"导航失败：{msg.splitlines()[0][:160]}")
+                    return None
             return None
 
         def load(path, label):
+            doc_status["code"] = None
             resp = goto_tolerant(path)
             html = wait_real_page(page)
-            st = resp.status if resp else "?"
+            st = resp.status if resp else doc_status["code"]
             log(f"{label} HTTP {st} | 标题：{page.title()} | 页面长度 {len(html)}")
             return html
+
+        def downed():
+            if page.url.startswith("chrome-error://"):
+                return True
+            st = doc_status["code"]
+            return isinstance(st, int) and st >= 500
 
         html = ""
         for attempt in (1, 2):
@@ -343,16 +364,27 @@ def run():
             if attempt == 2:
                 log("挑战未通过，经首页再试一次…")
             home = load(f"{BASE}/forum.php", f"论坛首页{suffix}")
+            if downed():
+                break
             if unavailable_reason(home, page):
                 html = home
                 break
             html = load(SIGN_PAGE, f"签到页{suffix}")
+            if downed():
+                break
             if unavailable_reason(html, page):
                 break
             if not (
                 "__noxExpire" in html or is_challenge(page, html) or len(html) < 500
             ):
                 break
+
+        if downed():
+            close_all()
+            st = doc_status["code"] if doc_status["code"] is not None else "无"
+            finish(EXIT_RETRY_LATER,
+                   f"站点源站异常（浏览器加载失败，最近响应 HTTP {st}）：工作流将在 10 分钟后自动重试",
+                   [])
 
         reason = unavailable_reason(html, page)
         if reason:
