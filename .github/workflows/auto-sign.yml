@@ -12,7 +12,7 @@ permissions:
 jobs:
   auto-sign:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     env:
       TZ: Asia/Shanghai
     steps:
@@ -41,14 +41,14 @@ jobs:
           HEADLESS: '0'
         run: |
           # GitHub 定时任务常延迟数小时，可能撞上百合会每日维护或 Cloudflare 5xx 源站宕机（退出码 3）：每 10 分钟重试一次
-          for i in $(seq 1 10); do
+          for i in $(seq 1 20); do
             code=0
             xvfb-run -a -s "-screen 0 1920x1080x24" python sign.py || code=$?
             if [ "$code" -ne 3 ]; then
               exit "$code"
             fi
-            if [ "$i" -lt 10 ]; then
-              echo "站点暂时不可用（维护/源站宕机），10 分钟后重试（$i/10）"
+            if [ "$i" -lt 20 ]; then
+              echo "站点暂时不可用（维护/源站宕机），10 分钟后重试（$i/20）"
               sleep 600
             fi
           done
